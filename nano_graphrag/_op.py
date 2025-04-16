@@ -4,6 +4,7 @@ import asyncio
 import tiktoken
 from typing import Union
 from collections import Counter, defaultdict
+from langchain.text_splitter import MarkdownTextSplitter, RecursiveCharacterTextSplitter
 from ._splitter import SeparatorSplitter
 from ._utils import (
     logger,
@@ -95,6 +96,80 @@ def chunking_by_seperators(
                 }
             )
 
+    return results
+
+
+def chunking_by_markdown_recursive(
+    tokens_list: list[list[int]],
+    doc_keys: list[str],
+    tiktoken_model,
+    overlap_token_size=128,
+    max_token_size=1024,
+    markdown_chunk_size=2048,
+    markdown_overlap=200,
+    recursive_separators=["\n\n", "\n", " ", ""]
+):
+    """Chunk text using both MarkdownTextSplitter and RecursiveCharacterTextSplitter in sequence.
+    
+    First splits the text using MarkdownTextSplitter to preserve markdown structure,
+    then further splits those chunks using RecursiveCharacterTextSplitter for finer granularity.
+    
+    Args:
+        tokens_list: List of token lists for each document
+        doc_keys: List of document keys
+        tiktoken_model: Tiktoken model for encoding/decoding
+        overlap_token_size: Number of overlapping tokens for final chunks
+        max_token_size: Maximum number of tokens for final chunks
+        markdown_chunk_size: Size of initial markdown chunks
+        markdown_overlap: Overlap size for markdown chunks
+        recursive_separators: List of separators for recursive splitting
+        
+    Returns:
+        List of dictionaries containing chunk information
+    """
+    results = []
+    
+    # First split using MarkdownTextSplitter
+    markdown_splitter = MarkdownTextSplitter(
+        chunk_size=markdown_chunk_size,
+        chunk_overlap=markdown_overlap
+    )
+    
+    # Then use RecursiveCharacterTextSplitter for finer splitting
+    recursive_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=max_token_size,
+        chunk_overlap=overlap_token_size,
+        separators=recursive_separators,
+        length_function=lambda x: len(tiktoken_model.encode(x))
+    )
+    
+    for index, tokens in enumerate(tokens_list):
+        # Decode tokens back to text
+        text = tiktoken_model.decode(tokens)
+        
+        # First split with MarkdownTextSplitter
+        markdown_chunks = markdown_splitter.split_text(text)
+        
+        # For each markdown chunk, apply RecursiveCharacterTextSplitter
+        chunk_order_index = 0
+        for markdown_chunk in markdown_chunks:
+            recursive_chunks = recursive_splitter.split_text(markdown_chunk)
+            
+            # Process each final chunk
+            for chunk in recursive_chunks:
+                # Get token count for the chunk
+                chunk_tokens = len(tiktoken_model.encode(chunk))
+                
+                results.append(
+                    {
+                        "tokens": chunk_tokens,
+                        "content": chunk.strip(),
+                        "chunk_order_index": chunk_order_index,
+                        "full_doc_id": doc_keys[index],
+                    }
+                )
+                chunk_order_index += 1
+    
     return results
 
 
