@@ -10,3 +10,4 @@ tenacity
 dspy-ai
 neo4j
 aioboto3
+langchain>=0.1.0
